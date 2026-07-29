@@ -1,0 +1,9 @@
+services:
+  stryd-ics:
+    image: ghcr.io/asturale/stryd-ics:latest
+    container_name: stryd-ics
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "8080:8080"
