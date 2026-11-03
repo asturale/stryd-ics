@@ -12,8 +12,8 @@ Runs as a single container: it refreshes the feed in the background on a timer a
 docker run -d \
   -e STRYD_EMAIL=you@example.com \
   -e STRYD_PASSWORD=your-password \
-  -e ICS_TOKEN=$(python3 -c "import secrets; print(secrets.token_hex(20))") \
-  -p 8080:8080 \
+  -e ICS_TOKEN=$(python3 -c "import secrets; print(secrets.token_urlsafe(24))") \
+  -p 127.0.0.1:8080:8080 \
   ghcr.io/asturale/stryd-ics:latest
 ```
 
@@ -23,7 +23,7 @@ Or with Docker Compose — copy `.env.example` to `.env`, fill it in, then:
 docker compose up -d
 ```
 
-Subscribe to `http://<host>:8080/<ICS_TOKEN>.ics` in Google Calendar, Fastmail, Apple Calendar, Outlook, etc. Put a reverse proxy (Caddy, nginx, a Cloudflare Tunnel) in front for HTTPS if exposing it outside your own network — most calendar apps expect (or strongly prefer) HTTPS for subscribed feeds.
+The container only listens on localhost by default. Put a reverse proxy (Caddy, nginx, a Cloudflare Tunnel) with HTTPS in front and subscribe to `https://<your-host>/<ICS_TOKEN>.ics` in Google Calendar, Fastmail, Apple Calendar, Outlook, etc. Most calendar apps expect HTTPS for subscribed feeds.
 
 ## Configuration
 
@@ -31,7 +31,7 @@ Subscribe to `http://<host>:8080/<ICS_TOKEN>.ics` in Google Calendar, Fastmail, 
 |---|---|---|---|
 | `STRYD_EMAIL` | yes | — | Your Stryd account email |
 | `STRYD_PASSWORD` | yes | — | Your Stryd account password |
-| `ICS_TOKEN` | no | *(none)* | Secret path segment: feed is served at `/<ICS_TOKEN>.ics`. If unset, served at the guessable `/calendar.ics` — set this if the container is reachable from the internet |
+| `ICS_TOKEN` | yes | — | Secret path segment: the feed is served at `/<ICS_TOKEN>.ics`. At least 16 characters (letters, digits, `-`, `_`); the server refuses to start without it |
 | `TZ_NAME` | no | `Europe/Amsterdam` | IANA timezone used to resolve workout dates |
 | `CALNAME` | no | `Stryd workouts` | Calendar display name (`X-WR-CALNAME`) |
 | `REFRESH_SECONDS` | no | `21600` (6h) | How often to re-fetch from Stryd |
@@ -42,7 +42,9 @@ Subscribe to `http://<host>:8080/<ICS_TOKEN>.ics` in Google Calendar, Fastmail, 
 ## Security notes
 
 - Your Stryd credentials are only ever sent to `stryd.com`/`api.stryd.com`, and only from inside the container.
-- Treat the feed URL like a password if you set `ICS_TOKEN` — anyone with the URL can read your planned workouts. There's no further auth; put it behind a reverse proxy with IP/ASN restrictions if you want to lock it down further (e.g. to your calendar provider's network only).
+- Secure by default: a secret `ICS_TOKEN` is required, compared in constant time, and the published Compose file binds to localhost only, runs read-only, as an unprivileged user, with all capabilities dropped.
+- Treat the feed URL like a password: anyone with the URL can read your planned workouts. There is no further auth; put it behind a reverse proxy with IP/ASN restrictions if you want to lock it down further (e.g. to your calendar provider's network only).
+- Plain HTTP inside the container: HTTPS is your proxy's job. Upstream errors are logged, not shown to clients.
 - This uses Stryd's undocumented web-app API (the same one [stryd.com](https://www.stryd.com) itself uses when logged in via a browser) — not an official integration. It may break if Stryd changes their app.
 
 ## How it works
