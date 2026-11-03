@@ -1,3 +1,5 @@
 .env
 __pycache__/
 *.pyc
+# Static mode: the generated feed is named after your secret token, never commit it
+deploy/cloudflare-pages/public/*.ics

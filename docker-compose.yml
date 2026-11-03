@@ -4,6 +4,12 @@ services:
     container_name: stryd-ics
     restart: unless-stopped
     env_file:
-      - .env
+      - .env   # STRYD_EMAIL, STRYD_PASSWORD and ICS_TOKEN (required)
     ports:
-      - "8080:8080"
+      # Localhost only: put a reverse proxy or tunnel with HTTPS in front.
+      # Change to "8080:8080" only if you really want it on your whole network.
+      - "127.0.0.1:8080:8080"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true

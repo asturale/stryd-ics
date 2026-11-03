@@ -10,12 +10,14 @@ Runs as a single long-lived process: refreshes the feed on a timer in the
 background and serves the current cached copy over HTTP.
 
 Endpoints:
-  GET /<ICS_TOKEN>.ics   -> the calendar feed (path secret if ICS_TOKEN is set)
+  GET /<ICS_TOKEN>.ics   -> the calendar feed (ICS_TOKEN is required)
   GET /healthz            -> liveness check
 """
 import datetime
+import hmac
 import json
 import os
+import re
 import sys
 import threading
 import time
@@ -26,6 +28,13 @@ from zoneinfo import ZoneInfo
 STRYD_EMAIL = os.environ["STRYD_EMAIL"]
 STRYD_PASSWORD = os.environ["STRYD_PASSWORD"]
 ICS_TOKEN = os.environ.get("ICS_TOKEN", "").strip()
+# Secure by default: the feed URL is the only thing protecting your training plan,
+# so a long secret path segment is required. Generate one with:
+#   python3 -c "import secrets; print(secrets.token_urlsafe(24))"
+if len(ICS_TOKEN) < 16 or not re.fullmatch(r"[A-Za-z0-9_-]+", ICS_TOKEN):
+    sys.exit("ICS_TOKEN must be set: at least 16 characters, letters/digits/-/_ only. "
+             "Generate one with: python3 -c \"import secrets; print(secrets.token_urlsafe(24))\"")
+FEED_PATH = f"/{ICS_TOKEN}.ics".encode()
 TZ = ZoneInfo(os.environ.get("TZ_NAME", "Europe/Amsterdam"))
 CALNAME = os.environ.get("CALNAME", "Stryd workouts")
 REFRESH_SECONDS = int(os.environ.get("REFRESH_SECONDS", "21600"))  # 6h, matches Stryd plan-update cadence
@@ -192,7 +201,10 @@ class Handler(BaseHTTPRequestHandler):
             body = body.encode("utf-8")
         self.send_response(code)
         self.send_header("Content-Type", content_type)
-        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'")
+        self.send_header("Referrer-Policy", "no-referrer")
+        self.send_header("Cache-Control", "private, max-age=300")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
@@ -202,12 +214,12 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, b"ok")
             return
 
-        expected_path = f"/{ICS_TOKEN}.ics" if ICS_TOKEN else "/calendar.ics"
-        if self.path == expected_path:
+        if hmac.compare_digest(self.path.encode(), FEED_PATH):
             try:
                 data = get_ics_cached()
             except Exception as e:
-                self._send(502, f"upstream fetch failed: {e}")
+                print(f"upstream fetch failed: {e}", file=sys.stderr)  # details in the log, not to the client
+                self._send(502, "upstream fetch failed")
                 return
             self._send(200, data, content_type="text/calendar; charset=utf-8")
             return
@@ -218,6 +230,32 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
 
+def write_static(out_dir):
+    """One-shot mode for static hosting: write <out_dir>/<ICS_TOKEN>.ics atomically and exit.
+    Exit code 0 = changed, 3 = unchanged (so a deploy step can be skipped), 1 = error."""
+    path = os.path.join(out_dir, f"{ICS_TOKEN}.ics")
+    data = build_ics()
+    others = [n for n in os.listdir(out_dir) if n.endswith(".ics") and n != os.path.basename(path)] if os.path.isdir(out_dir) else []
+    try:
+        with open(path, "rb") as f:
+            if f.read() == data and not others:
+                return 3
+    except FileNotFoundError:
+        pass
+    os.makedirs(out_dir, exist_ok=True)
+    # Only the current token's feed may be published: drop feeds of rotated tokens and leftovers.
+    for name in os.listdir(out_dir):
+        if (name.endswith(".ics") or ".ics.tmp-" in name) and name != os.path.basename(path):
+            os.remove(os.path.join(out_dir, name))
+    tmp = f"{path}.tmp-{os.getpid()}"
+    with open(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "wb") as f:
+        f.write(data)
+    os.replace(tmp, path)
+    return 0
+
+
 if __name__ == "__main__":
+    if len(sys.argv) == 3 and sys.argv[1] == "--write":
+        sys.exit(write_static(sys.argv[2]))
     threading.Thread(target=refresh_loop, daemon=True).start()
     ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
