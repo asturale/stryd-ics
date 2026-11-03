@@ -14,11 +14,15 @@ cd "$(dirname "$0")"
 : "${CLOUDFLARE_API_TOKEN:?}" "${CLOUDFLARE_ACCOUNT_ID:?}" "${PAGES_PROJECT:?}"
 WRANGLER_VERSION=4.156.0  # pinned on purpose; bump deliberately
 
-rc=0; python3 ../../server.py --write public || rc=$?
+# Each step gets only the secrets it needs: Stryd's for the fetch, Cloudflare's for the
+# deploy. Subshells with unset (not env -i VAR=value) keep the values out of argv/ps.
+rc=0
+( unset CLOUDFLARE_API_TOKEN; python3 ../../server.py --write public ) || rc=$?
 [ "$rc" = 3 ] && exit 0      # unchanged: nothing to deploy
 [ "$rc" = 0 ] || exit "$rc"
 
-npx -y "wrangler@$WRANGLER_VERSION" pages deploy public --project-name "$PAGES_PROJECT" --branch main --commit-dirty=true
+( unset STRYD_EMAIL STRYD_PASSWORD ICS_TOKEN
+  npx -y "wrangler@$WRANGLER_VERSION" pages deploy public --project-name "$PAGES_PROJECT" --branch main --commit-dirty=true )
 
 # Delete all older deployments, so no old copy of the feed lingers on a preview URL.
 # The token goes to curl on stdin (-H @-), never in argv where `ps` would show it.

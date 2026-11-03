@@ -235,13 +235,18 @@ def write_static(out_dir):
     Exit code 0 = changed, 3 = unchanged (so a deploy step can be skipped), 1 = error."""
     path = os.path.join(out_dir, f"{ICS_TOKEN}.ics")
     data = build_ics()
+    others = [n for n in os.listdir(out_dir) if n.endswith(".ics") and n != os.path.basename(path)] if os.path.isdir(out_dir) else []
     try:
         with open(path, "rb") as f:
-            if f.read() == data:
+            if f.read() == data and not others:
                 return 3
     except FileNotFoundError:
         pass
     os.makedirs(out_dir, exist_ok=True)
+    # Only the current token's feed may be published: drop feeds of rotated tokens and leftovers.
+    for name in os.listdir(out_dir):
+        if (name.endswith(".ics") or ".ics.tmp-" in name) and name != os.path.basename(path):
+            os.remove(os.path.join(out_dir, name))
     tmp = f"{path}.tmp-{os.getpid()}"
     with open(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "wb") as f:
         f.write(data)
