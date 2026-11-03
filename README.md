@@ -25,6 +25,16 @@ docker compose up -d
 
 The container only listens on localhost by default. Put a reverse proxy (Caddy, nginx, a Cloudflare Tunnel) with HTTPS in front and subscribe to `https://<your-host>/<ICS_TOKEN>.ics` in Google Calendar, Fastmail, Apple Calendar, Outlook, etc. Most calendar apps expect HTTPS for subscribed feeds.
 
+## Static mode: Cloudflare Pages (no server)
+
+Don't want a container running? `python3 server.py --write <dir>` fetches once, writes `<dir>/<ICS_TOKEN>.ics` (mode 0600, atomically) and exits with 0 if the feed changed, 3 if not, 1 on an error. [`deploy/cloudflare-pages/`](deploy/cloudflare-pages/) uses that to publish the feed on Cloudflare Pages from a cron job:
+
+- `deploy.sh` regenerates the feed and only deploys when it changed (wrangler, pinned version), then deletes all older deployments so no old copy lingers on a preview URL. The API token is passed to `curl` on stdin, never on the command line.
+- `functions/_middleware.js` serves the feed only on your own domain (Pages environment variable `FEED_HOST`); `*.pages.dev` and preview URLs return 404, and so does everything when `FEED_HOST` is unset.
+- `public/_headers` sets `text/calendar`, `nosniff` and `Cache-Control: private`.
+
+Use a Cloudflare token with only *Account → Cloudflare Pages: Edit*, create the Pages project, attach your domain, set `FEED_HOST`, and add `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` and `PAGES_PROJECT` to `.env`. The generated `.ics` is git-ignored: its name is your secret.
+
 ## Configuration
 
 | Variable | Required | Default | Description |
