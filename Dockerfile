@@ -1,5 +1,8 @@
 FROM python:3.12-alpine
 
+# Pull in security fixes for krb5-libs that the base image does not have yet.
+RUN apk upgrade --no-cache krb5-libs
+
 WORKDIR /app
 COPY server.py .
 
